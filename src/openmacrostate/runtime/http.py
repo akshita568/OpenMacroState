@@ -125,8 +125,30 @@ def _is_uri(value: object) -> bool:
     if not isinstance(value, str) or not value:
         return False
 
-    parsed = urlparse(value)
-    return bool(parsed.scheme) and not any(character.isspace() for character in value)
+    if any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in value
+    ):
+        return False
+
+    index = 0
+    while index < len(value):
+        if value[index] == "%":
+            if (
+                index + 2 >= len(value)
+                or value[index + 1] not in "0123456789abcdefABCDEF"
+                or value[index + 2] not in "0123456789abcdefABCDEF"
+            ):
+                return False
+            index += 3
+        else:
+            index += 1
+
+    try:
+        parsed = urlparse(value)
+        return bool(parsed.scheme)
+    except ValueError:
+        return False
 
 
 def _validate_http_recording(record: object) -> dict[str, object]:
@@ -171,7 +193,10 @@ def _validate_http_recording(record: object) -> dict[str, object]:
     if not _is_uri(url):
         raise ContractError("HTTP recording request url must be valid")
 
-    if not isinstance(accept, str) or accept not in {"application/json", "text/html"}:
+    if not isinstance(accept, str) or accept not in {
+        "application/json",
+        "text/html",
+    }:
         raise ContractError("HTTP recording request accept must be application/json or text/html")
 
     expected_response_fields = {
@@ -197,10 +222,12 @@ def _validate_http_recording(record: object) -> dict[str, object]:
         raise ContractError("HTTP recording status_code must be an integer between 100 and 599")
 
     final_url = response_record["final_url"]
+
     if not _is_uri(final_url):
         raise ContractError("HTTP recording final_url must be valid")
 
     headers = response_record["headers"]
+
     if not isinstance(headers, dict):
         raise ContractError("HTTP recording response headers must be an object")
 
@@ -208,14 +235,9 @@ def _validate_http_recording(record: object) -> dict[str, object]:
         if not isinstance(name, str) or not isinstance(value, str):
             raise ContractError("HTTP recording response headers must be strings")
 
-    normalized_header_names = [name.lower() for name in headers]
-    if len(normalized_header_names) != len(set(normalized_header_names)):
-        raise ContractError("HTTP recording contains duplicate case-insensitive headers")
-    unknown_headers = sorted(set(normalized_header_names) - _RESPONSE_HEADERS)
-    if unknown_headers:
-        raise ContractError(
-            "HTTP recording contains non-audited response headers: " + ", ".join(unknown_headers)
-        )
+        if name not in _RESPONSE_HEADERS:
+            raise ContractError("HTTP recording contains non-audited response headers: " + name)
+
     retrieved_at = response_record["retrieved_at"]
 
     if not isinstance(retrieved_at, str):
@@ -227,6 +249,9 @@ def _validate_http_recording(record: object) -> dict[str, object]:
 
     if not isinstance(body_file, str) or not body_file:
         raise ContractError("HTTP recording body_file must be a non-empty string")
+
+    if "\x00" in body_file:
+        raise ContractError("HTTP recording body_file contains a NUL byte")
 
     byte_length = response_record["byte_length"]
 
@@ -445,6 +470,10 @@ class RecordedHttpTransport:
     def _body_path(self, relative_value: object) -> Path:
         if not isinstance(relative_value, str) or not relative_value:
             raise ContractError("HTTP recording body_file must be a relative path")
+
+        if "\x00" in relative_value:
+            raise ContractError("HTTP recording body_file contains a NUL byte")
+
         relative = Path(relative_value)
         if relative.is_absolute() or ".." in relative.parts:
             raise ContractError("HTTP recording body_file escapes the fixture directory")
@@ -481,7 +510,7 @@ class RecordedHttpTransport:
         expected_length = response["byte_length"]
 
         if expected_length > request.max_bytes:
-            raise ContractError("HTTP recording body byte length does not match its manifest")
+            raise ContractError("HTTP recording body exceeds the connector byte limit")
 
         expected_sha256 = response["sha256"]
 

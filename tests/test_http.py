@@ -324,6 +324,104 @@ def test_inspect_rejects_malformed_request(tmp_path: Path) -> None:
         inspect_http_recording(recording)
 
 
+def test_inspect_rejects_invalid_request_percent_escape(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(tmp_path)
+
+    data = json.loads(recording.read_text())
+    data["request"]["url"] = "https://example.com/%ZZ"
+    recording.write_text(json.dumps(data))
+
+    with pytest.raises(ContractError, match="url"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_invalid_final_url_percent_escape(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        final_url="https://example.com/%ZZ",
+    )
+
+    with pytest.raises(ContractError, match="url"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_malformed_request_ipv6(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(tmp_path)
+
+    data = json.loads(recording.read_text())
+    data["request"]["url"] = "https://[not-ipv6"
+    recording.write_text(json.dumps(data))
+
+    with pytest.raises(ContractError, match="url"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_malformed_final_url_ipv6(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        final_url="https://[not-ipv6",
+    )
+
+    with pytest.raises(ContractError, match="url"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_control_character_in_url(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        final_url="https://example.com/\x00",
+    )
+
+    with pytest.raises(ContractError, match="url"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_nul_body_file(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        body_file="body\x00.json",
+    )
+
+    with pytest.raises(ContractError, match="NUL"):
+        inspect_http_recording(recording)
+
+
+def test_inspect_rejects_uppercase_header(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        headers={"Content-Type": "application/json"},
+    )
+
+    with pytest.raises(ContractError, match="non-audited"):
+        inspect_http_recording(recording)
+
+
+def test_recorded_transport_rejects_uppercase_header(
+    tmp_path: Path,
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        headers={"Content-Type": "application/json"},
+    )
+
+    with pytest.raises(ContractError, match="non-audited"):
+        RecordedHttpTransport(recording)
+
+
 def test_inspect_rejects_missing_body(tmp_path: Path) -> None:
     recording = make_recording(tmp_path)
 
@@ -432,6 +530,41 @@ def test_inspect_recording_cli_never_uses_network(
     )
 
     assert main(["connector", "inspect-recording", str(recording)]) == 0
+
+
+def test_inspect_recording_cli_rejects_malformed_url(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        final_url="https://[not-ipv6",
+    )
+
+    assert main(["connector", "inspect-recording", str(recording)]) == 2
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "ERROR:" in captured.err
+
+
+def test_inspect_recording_cli_rejects_nul_body_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    recording = make_recording(
+        tmp_path,
+        body_file="body\x00.json",
+    )
+
+    assert main(["connector", "inspect-recording", str(recording)]) == 2
+
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "ERROR:" in captured.err
+    assert "NUL" in captured.err
 
 
 def test_inspect_rejects_duplicate_json_keys(tmp_path: Path) -> None:
