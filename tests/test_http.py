@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
+from jsonschema import FormatChecker
 
 from openmacrostate.api.v1.connector_types import FetchRequest
 from openmacrostate.api.v1.errors import CaseValidationError, ContractError
@@ -12,6 +13,10 @@ from openmacrostate.runtime.http import (
     inspect_http_recording,
 )
 from openmacrostate.runtime.jsonio import sha256_bytes
+
+
+def test_jsonschema_uri_format_checker_is_available() -> None:
+    assert "uri" in FormatChecker.checkers
 
 
 def test_recorded_transport_rejects_wrong_sha256(tmp_path: Path) -> None:
@@ -658,3 +663,59 @@ def test_inspect_rejects_recording_hard_link(tmp_path: Path) -> None:
         match="hard link",
     ):
         inspect_http_recording(hard_link)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("url", "https://example.com/a|b"),
+        ("url", "https://example.com:foo/data"),
+        ("final_url", "https://example.com/a|b"),
+        ("final_url", "https://example.com:foo/data"),
+    ],
+)
+def test_inspect_http_recording_rejects_invalid_uri_syntax(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    recording_path = make_recording(tmp_path)
+    recording = json.loads(recording_path.read_text(encoding="utf-8"))
+
+    if field == "url":
+        recording["request"]["url"] = value
+    else:
+        recording["response"]["final_url"] = value
+
+    recording_path.write_text(
+        json.dumps(recording),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="must be valid"):
+        inspect_http_recording(recording_path)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "urn:example:recording",
+        "mailto:research@example.com",
+    ],
+)
+def test_inspect_http_recording_accepts_valid_non_http_uris(
+    tmp_path: Path,
+    uri: str,
+) -> None:
+    recording_path = make_recording(tmp_path)
+    recording = json.loads(recording_path.read_text(encoding="utf-8"))
+
+    recording["request"]["url"] = uri
+    recording["response"]["final_url"] = uri
+
+    recording_path.write_text(
+        json.dumps(recording),
+        encoding="utf-8",
+    )
+
+    inspect_http_recording(recording_path)

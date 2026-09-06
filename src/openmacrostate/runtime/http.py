@@ -14,7 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol
-from urllib.parse import urlparse
+
+from rfc3986_validator import validate_rfc3986
 
 from openmacrostate.api.v1.connector_types import FetchRequest, TransportResponse
 from openmacrostate.api.v1.errors import ContractError
@@ -131,24 +132,7 @@ def _is_uri(value: object) -> bool:
     ):
         return False
 
-    index = 0
-    while index < len(value):
-        if value[index] == "%":
-            if (
-                index + 2 >= len(value)
-                or value[index + 1] not in "0123456789abcdefABCDEF"
-                or value[index + 2] not in "0123456789abcdefABCDEF"
-            ):
-                return False
-            index += 3
-        else:
-            index += 1
-
-    try:
-        parsed = urlparse(value)
-        return bool(parsed.scheme)
-    except ValueError:
-        return False
+    return bool(validate_rfc3986(value))
 
 
 def _validate_http_recording(record: object) -> dict[str, object]:
