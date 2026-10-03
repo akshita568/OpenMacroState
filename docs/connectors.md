@@ -164,6 +164,11 @@ This command verifies the JSON schema, ensures the `body_file` path is safe (blo
 
 **Note:** This command verifies internal consistency and self-reported timestamps. It does *not* establish source authentication or historical eligibility.
 
+URI validation uses the MIT-licensed `rfc3986-validator` runtime dependency,
+which is installed automatically with the package; the `dev` extra is not
+required to run the CLI. Pull-request CI checks a wheel installed in a fresh
+environment outside the checkout on Linux and Windows.
+
 ***examples***
 
 ```bash
